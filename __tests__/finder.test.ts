@@ -3,7 +3,8 @@ import * as finder from '../src/finder'
 
 import fs from 'fs'
 
-const FIXTURES_DIR = `${finder.ROOT_DIR}/__tests__/fixtures`
+// would be good to mock that
+const ENV = process.env.ENV
 
 beforeAll(() => {
   return initGitData()
@@ -13,170 +14,80 @@ afterAll(() => {
   return clearGitData()
 })
 
-describe('test diffing rules', () => {
-  test('match diff change on parent dir', async () => {
-    let rule = {
-      paths: ['__tests__/fixtures/dummy1']
-    }
-
-    const diff = await finder.getDiff(finder.buildOptions(rule))
-    const fillFiles = diff.files.map(elem => elem.file)
-    expect(fillFiles).toContainEqual('__tests__/fixtures/dummy1/test')
-    expect(diff.changed).toBe(2)
-    expect(diff.insertions).toBe(1)
-
-    const matches = await finder.ruleMatchesChange(rule)
-    expect(matches).toBeTruthy()
-  })
-
-  test('match diff change on exact file', async () => {
-    let rule = {
-      paths: ['__tests__/fixtures/dummy1/.test']
-    }
-
-    const diff = await finder.getDiff(finder.buildOptions(rule))
-    const fillFiles = diff.files.map(elem => elem.file)
-    expect(fillFiles).toContainEqual('__tests__/fixtures/dummy1/.test')
-    expect(diff.changed).toBe(1)
-    expect(diff.insertions).toBe(1)
-
-    const matches = await finder.ruleMatchesChange(rule)
-    expect(matches).toBeTruthy()
-  })
-
-  test('match diff change on parent dir with file in subdir', async () => {
-    let rule = {
-      paths: ['__tests__/fixtures/dummy2']
-    }
-
-    const diff = await finder.getDiff(finder.buildOptions(rule))
-    const fillFiles = diff.files.map(elem => elem.file)
-    expect(fillFiles).toContainEqual(
-      '__tests__/fixtures/dummy2/scripts/test.sh'
-    )
-    expect(diff.changed).toBe(2)
-    expect(diff.insertions).toBe(2)
-
-    const matches = await finder.ruleMatchesChange(rule)
-    expect(matches).toBeTruthy()
-  })
-
-  test('match diff change on parent dir with must include condition', async () => {
-    let rule = {
-      paths: ['__tests__/fixtures/dummy3'],
-      must_include: ['__tests__/fixtures/dummy3/envs/preprod']
-    }
-    const diff = await finder.getDiff(finder.buildOptions(rule))
-    const fillFiles = diff.files.map(elem => elem.file)
-    expect(fillFiles).toContainEqual('__tests__/fixtures/dummy3/test')
-    expect(diff.changed).toBe(2)
-    expect(diff.insertions).toBe(1)
-
-    const satisfiesMustInclude = finder.satisfiesMustInclude(rule)
-    expect(satisfiesMustInclude).toBeTruthy()
-
-    const match = await finder.ruleMatchesChange(rule)
-    expect(match).toBeTruthy()
-  })
-
-  test('no diff change on parent dir with must include condition', async () => {
-    let rule = {
-      paths: ['__tests__/fixtures/dummy3'],
-      must_include: ['__tests__/fixtures/dummy3/envs/staging']
-    }
-
-    const diff = await finder.getDiff(finder.buildOptions(rule))
-    const fillFiles = diff.files.map(elem => elem.file)
-    expect(fillFiles).toContainEqual('__tests__/fixtures/dummy3/test')
-    expect(diff.changed).toBe(2)
-    expect(diff.insertions).toBe(1)
-
-    const satisfiesMustInclude = finder.satisfiesMustInclude(rule)
-    expect(satisfiesMustInclude).not.toBeTruthy()
-
-    const match = await finder.ruleMatchesChange(rule)
-    expect(match).not.toBeTruthy()
-  })
-
-  test('no diff change on unknown parent dir', async () => {
-    let rule = {
-      paths: ['__tests__/fixtures/dummy-does-not-exist']
-    }
-
-    const diff = await finder.getDiff(finder.buildOptions(rule))
-    expect(diff.changed).toBe(0)
-    expect(diff.insertions).toBe(0)
-
-    const match = await finder.ruleMatchesChange(rule)
-    expect(match).not.toBeTruthy()
-  })
+test('getDiffScripts', async () => {
+  const diffedFiles = await finder.getDiffScripts()
+  expect(diffedFiles).toContainEqual('scripts/test')
+  expect(diffedFiles).toContainEqual('.github/dummy')
 })
 
-describe('test diffing yaml manifests', () => {
-  test('match diff change on parent dir', async () => {
-    const file = '__tests__/rules-test1.yml'
-    const rules = await helpers.getYamlRules(file)
+test('getDiffEnvs', async () => {
+  const diffedFiles = await finder.getDiffEnvs()
+  expect(diffedFiles).toContainEqual(`terraform/envs/${ENV}.tfvars`)
+})
 
-    for (const rule of rules) {
-      let match = await finder.ruleMatchesChange(rule)
-      expect(match).toBeTruthy()
-    }
-  })
+test('getDiffCommon', async () => {
+  const diffedFiles = await finder.getDiffCommon()
+  expect(diffedFiles).toContainEqual(`terraform/common/dummy-file`)
+})
 
-  test('match diff change on parent dir with must include condition', async () => {
-    const file = '__tests__/rules-test2.yml'
-    const rules = await helpers.getYamlRules(file)
+test('getDiffComponentEnvs', async () => {
+  const diffedFiles = await finder.getDiffComponentEnvs()
+  expect(diffedFiles).toContainEqual(
+    `terraform/components/route53/envs/${ENV}.tfvars`
+  )
+})
 
-    for (const rule of rules) {
-      let match = await finder.ruleMatchesChange(rule)
-      expect(match).toBeTruthy()
-    }
-  })
-
-  test('no diff change on parent dir with must include condition', async () => {
-    const file = '__tests__/rules-test3.yml'
-    const rules = await helpers.getYamlRules(file)
-
-    for (const rule of rules) {
-      let match = await finder.ruleMatchesChange(rule)
-      expect(match).not.toBeTruthy()
-    }
-  })
+test('getDiffComponents', async () => {
+  const diffedFiles = await finder.getDiffComponents()
+  expect(diffedFiles).toContainEqual('dynamodb')
 })
 
 const initGitData = async () => {
-  console.log('create fixture dir')
-  if (!fs.existsSync(FIXTURES_DIR)) {
-    fs.mkdirSync(FIXTURES_DIR)
-  }
+  console.log('create fixtures')
+  fs.mkdirSync(`${finder.ROOT_DIR}/scripts`)
+  fs.closeSync(fs.openSync(`${finder.ROOT_DIR}/scripts/test`, 'w'))
+  fs.appendFileSync(`${finder.ROOT_DIR}/.github/dummy`, '#test')
 
-  fs.mkdirSync(`${FIXTURES_DIR}/dummy1`)
-  fs.closeSync(fs.openSync(`${FIXTURES_DIR}/dummy1/test`, 'w'))
-  fs.appendFileSync(`${FIXTURES_DIR}/dummy1/.test`, '# test')
-  fs.mkdirSync(`${FIXTURES_DIR}/dummy2`)
-  fs.mkdirSync(`${FIXTURES_DIR}/dummy2/scripts`)
-  fs.appendFileSync(`${FIXTURES_DIR}/dummy2/scripts/test.sh`, '#test')
-  fs.appendFileSync(`${FIXTURES_DIR}/dummy2/scripts/test2.sh`, '# test')
+  fs.mkdirSync(`${finder.ROOT_DIR}/terraform/envs`, {recursive: true})
+  fs.closeSync(
+    fs.openSync(`${finder.ROOT_DIR}/terraform/envs/${ENV}.tfvars`, 'w')
+  )
 
-  fs.mkdirSync(`${FIXTURES_DIR}/dummy3`)
-  fs.mkdirSync(`${FIXTURES_DIR}/dummy3/envs`)
-  fs.appendFileSync(`${FIXTURES_DIR}/dummy3/test`, '# test')
-  fs.closeSync(fs.openSync(`${FIXTURES_DIR}/dummy3/envs/preprod`, 'w'))
+  fs.mkdirSync(`${finder.ROOT_DIR}/terraform/common`, {recursive: true})
+  fs.closeSync(
+    fs.openSync(`${finder.ROOT_DIR}/terraform/common/dummy-file`, 'w')
+  )
 
-  fs.mkdirSync(`${FIXTURES_DIR}/dummy4`)
-  fs.mkdirSync(`${FIXTURES_DIR}/dummy4/envs`)
-  fs.appendFileSync(`${FIXTURES_DIR}/dummy4/test`, '# test')
+  fs.mkdirSync(`${finder.ROOT_DIR}/terraform/components/route53/envs`, {
+    recursive: true
+  })
+  fs.closeSync(
+    fs.openSync(
+      `${finder.ROOT_DIR}/terraform/components/route53/envs/${ENV}.tfvars`,
+      'w'
+    )
+  )
 
-  console.log('commit fixtures dir to create a diff change')
-  await finder.git.add(FIXTURES_DIR)
+  fs.mkdirSync(`${finder.ROOT_DIR}/terraform/components/dynamodb/envs`, {
+    recursive: true
+  })
+  fs.appendFileSync(
+    `${finder.ROOT_DIR}/terraform/components/dynamodb/test`,
+    '# test'
+  )
+  fs.closeSync(
+    fs.openSync(
+      `${finder.ROOT_DIR}/terraform/components/dynamodb/envs/${ENV}.tfvars`,
+      'w'
+    )
+  )
+
+  await finder.git.add('.')
   await finder.git.commit('dummy commit')
 }
 
 const clearGitData = async () => {
-  console.log('revert commit changes used for tests')
+  console.log('clean up fixtures')
   var lastCommitID: string = await finder.git.revparse(['--short', 'HEAD'])
   await finder.git.revert(lastCommitID, ['--soft'])
-
-  console.log('clean up fixtures dir')
-  fs.rmdirSync(FIXTURES_DIR, {recursive: true})
 }

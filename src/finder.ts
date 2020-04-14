@@ -2,56 +2,116 @@ import * as core from '@actions/core'
 import fs from 'fs'
 
 import gitP, {SimpleGit} from 'simple-git/promise'
-import {DiffResult} from 'simple-git/typings/response'
+import {DiffResult, ListLogSummary} from 'simple-git/typings/response'
 
 import {getRootDir} from './helpers'
 
 export const ROOT_DIR = getRootDir()
+export const ENV = process.env.ENV
+
 export const git: SimpleGit = gitP(ROOT_DIR)
-
-/** Runs the diffing rules against the working tree */
-export async function ruleMatchesChange(rule): Promise<boolean> {
-  const options = buildOptions(rule)
-  const diff = await getDiff(options)
-  core.debug(`Diffing with options ${options}`)
-
-  if (diff.changed > 0 && satisfiesMustInclude(rule)) {
-    const diffedFiles = diff.files.map(elem => elem.file)
-    core.info(`Changed files: ${diffedFiles}`)
-
-    return true
-  }
-
-  return false
-}
 
 /** Performs diffing based on the rules from the manifest */
 export async function getDiff(extraOptions: string[]): Promise<DiffResult> {
-  const baseOptions = ['--no-color', 'origin/master...']
+  const baseOptions = [
+    '--no-color',
+    'origin/master...'
+  ]
   const diff = await git.diffSummary([...baseOptions, ...extraOptions])
   return diff
 }
 
-/** Builds options to pass to diff command */
-export function buildOptions(rule: object): string[] {
-  const fullPaths: string[] = rule['paths'].map(el => `${ROOT_DIR}/${el}`)
-  return fullPaths.length ? ['--', ...fullPaths] : []
+export const getStatus = async (): Promise<ListLogSummary> => {
+  const commit = await git.log(['-1'])
+  return commit
 }
 
-/** Processes must_include in the rule if it's defined */
-export function satisfiesMustInclude(rule: object): boolean {
-  if ('must_include' in rule && rule['must_include'].length > 0) {
-    core.debug('Iterating over must_include elements')
+export const getRevision = async (): Promise<string> => {
+  const rev = await git.revparse(['--short', 'HEAD'])
+  return rev
+}
 
-    for (const includePath of rule['must_include']) {
-      if (fs.existsSync(includePath)) {
-        core.info(`Path found in must_include: ${includePath}`)
-        return true
-      }
-    }
+export const getDiffScripts = async (): Promise<string[]> => {
+  const cmdOptions = [
+    '--',
+    `${ROOT_DIR}/.git*`,
+    `${ROOT_DIR}/scripts`
+  ]
+  const diff = await getDiff(cmdOptions)
+  const diffedFiles = diff.files.map(elem => elem.file)
 
-    return false
-  }
+  core.info(`diff options: ${cmdOptions}`)
+  core.info(`files returned: ${diffedFiles}`)
 
-  return true
+  return diffedFiles
+}
+
+export const getDiffEnvs = async (): Promise<string[]> => {
+  const cmdOptions = [
+    '--',
+    `${ROOT_DIR}/terraform/envs/${ENV}.tfvars`
+  ]
+  const diff = await getDiff(cmdOptions)
+  const diffedFiles = diff.files.map(elem => elem.file)
+
+  core.info(`diff options: ${cmdOptions}`)
+  core.info(`files returned: ${diffedFiles}`)
+
+  return diffedFiles
+}
+
+export const getDiffCommon = async (): Promise<string[]> => {
+  const cmdOptions = [
+    '--',
+    `${ROOT_DIR}/terraform`,
+    ':!terraform/envs',
+    ':!terraform/components'
+  ]
+  const diff = await getDiff(cmdOptions)
+  const diffedFiles = diff.files.map(elem => elem.file)
+
+  core.info(`diff options: ${cmdOptions}`)
+  core.info(`files returned: ${diffedFiles}`)
+
+  return diffedFiles
+}
+
+export const getDiffComponentEnvs = async (): Promise<string[]> => {
+  const cmdOptions = [
+    '--',
+    `${ROOT_DIR}/terraform/components/*/envs/*`
+  ]
+  const diff = await getDiff(cmdOptions)
+  const diffedFiles = diff.files.map(elem => elem.file)
+
+  core.info(`diff options: ${cmdOptions}`)
+  core.info(`files returned: ${diffedFiles}`)
+
+  return diffedFiles.filter(file => file.endsWith(`${ENV}.tfvars`))
+}
+
+export const getDiffComponents = async (): Promise<string[]> => {
+  const cmdOptions = [
+    '--',
+    `${ROOT_DIR}/terraform/components`,
+    ':!*/envs/*'
+  ]
+  const diff = await getDiff(cmdOptions)
+  const components = diff.files.map(elem => getComponentName(elem.file))
+
+  core.info(`diff options: ${cmdOptions}`)
+  core.info(`files returned: ${components}`)
+
+  const uniqueComponents = [...new Set(components)]
+
+  return uniqueComponents.filter(elem => isEnvInComponent(elem))
+}
+
+export function getComponentName(path: string): string {
+  return path.includes('/') ? path.split('/')[2] : path
+}
+
+export function isEnvInComponent(component: string): boolean {
+  const path = `${ROOT_DIR}/terraform/components/${component}/envs/${ENV}.tfvars`
+  return fs.existsSync(path)
 }
